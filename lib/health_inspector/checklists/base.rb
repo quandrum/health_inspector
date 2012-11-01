@@ -7,12 +7,7 @@ module HealthInspector
       include Color
 
       class << self
-        attr_reader :checks, :title
-
-        def add_check(name, &block)
-          @checks ||= []
-          @checks << block
-        end
+        attr_reader :title
 
         def title(val=nil)
           val.nil? ? @title : @title = val
@@ -27,11 +22,24 @@ module HealthInspector
         @context = context
       end
 
+      def all_item_names
+        ( server_items + local_items ).uniq.sort
+      end
+
+      # Subclasses should collect all items from the server and the local repo,
+      # and for each item pair, yield an object that contains a reference to
+      # the server item, and the local repo item. A reference can be nil if it does
+      # not exist in one of the locations.
+      def each_item
+        raise NotImplementedError, "You must implement this method in a subclass"
+      end
+
       def run
         banner "Inspecting #{self.class.title}"
 
         each_item do |item|
-          failures = run_checks(item)
+          item.validate
+          failures = item.errors
 
           if failures.empty?
             print_success(item.name) unless @context.quiet_success
@@ -41,50 +49,8 @@ module HealthInspector
         end
       end
 
-      def run_checks(item)
-        checks.map { |check| run_check(check, item) }.compact
-      end
-
-      def checks
-        self.class.checks
-      end
-
-      class CheckContext
-        include Check, Color
-        attr_accessor :item, :context
-
-        def initialize(check, item, context)
-          @item = item
-          @context = context
-          @check = check
-        end
-
-        def call
-          instance_eval(&@check)
-        end
-
-        def diff(original, other)
-          (original.keys + other.keys).uniq.inject({}) do |memo, key|
-            unless original[key] == other[key]
-              if original[key].kind_of?(Hash) && other[key].kind_of?(Hash)
-                memo[key] = diff(original[key], other[key])
-              else
-                memo[key] = {"server" => original[key],"local" => other[key]}
-              end
-            end
-            memo
-          end
-        end
-      end
-
       def chef_rest
         @context.chef_rest
-      end
-
-      def run_check(check, item)
-        check_context = CheckContext.new(check, item, @context)
-        check_context.call
-        return check_context.failure
       end
 
       def banner(message)

@@ -2,47 +2,36 @@ require "chef/environment"
 
 module HealthInspector
   module Checklists
+    class Environment < Pairing
+      include ExistenceValidations
+      include JsonValidations
+
+      # Override to ignore _default environment if it is missing locally
+      def validate_local_copy_exists
+        super unless name == '_default'
+      end
+    end
+
     class Environments < Base
       title "environments"
 
-      add_check "local copy exists" do
-        failure "exists on server but not locally" unless item.local
-      end
-
-      add_check "server copy exists" do
-        failure "exists locally but not on server" unless item.server
-      end
-
-      add_check "items are the same" do
-        if item.server && item.local
-          item_diff = diff(item.server, item.local)
-          failure item_diff unless item_diff.empty?
-        end
-      end
-
-      Environment = Struct.new(:name, :server, :local)
-
       def each_item
-        server_items   = items_on_server
-        local_items    = items_in_repo
-        all_item_names = ( server_items + local_items ).uniq.sort
-
         all_item_names.each do |name|
-          item = Environment.new.tap do |item|
-            item.name   = name
-            item.server = load_item_from_server(name)
-            item.local  = load_item_from_local(name)
-          end
+          item = Environment.new(@context,
+            :name   => name,
+            :server => load_item_from_server(name),
+            :local  => load_item_from_local(name)
+          )
 
           yield item
         end
       end
 
-      def items_on_server
-        @items_on_server ||= Chef::Environment.list.keys
+      def server_items
+        @server_items ||= Chef::Environment.list.keys
       end
 
-      def items_in_repo
+      def local_items
         Dir.chdir("#{@context.repo_path}/environments") do
           Dir["*.{rb,json,js}"].map { |e| e.gsub(/\.(rb|json|js)/,"") }
         end

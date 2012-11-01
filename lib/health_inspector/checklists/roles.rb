@@ -1,50 +1,33 @@
 require "chef/role"
+require 'yajl'
 
 module HealthInspector
   module Checklists
+    class Role < Pairing
+      include ExistenceValidations
+      include JsonValidations
+    end
+
     class Roles < Base
       title "roles"
 
-      require 'yajl'
-
-      add_check "local copy exists" do
-        failure "exists on server but not locally" unless item.local
-      end
-
-      add_check "server copy exists" do
-        failure "exists locally but not on server" unless item.server
-      end
-
-      add_check "items are the same" do
-        if item.server && item.local
-          item_diff = diff(item.server, item.local)
-          failure item_diff unless item_diff.empty?
-        end
-      end
-
-      Role = Struct.new(:name, :server, :local)
-
       def each_item
-        server_items   = items_on_server
-        local_items    = items_in_repo
-        all_item_names = ( server_items + local_items ).uniq.sort
-
         all_item_names.each do |name|
-          item = Role.new.tap do |item|
-            item.name   = name
-            item.server = load_item_from_server(name)
-            item.local  = load_item_from_local(name)
-          end
+          item = Role.new(@context,
+            :name   => name,
+            :server => load_item_from_server(name),
+            :local  => load_item_from_local(name)
+          )
 
           yield item
         end
       end
 
-      def items_on_server
-        @items_on_server ||= Chef::Role.list.keys
+      def server_items
+        @server_items ||= Chef::Role.list.keys
       end
 
-      def items_in_repo
+      def local_items
         Dir.chdir("#{@context.repo_path}/roles") do
           Dir["*.{rb,json,js}"].map { |e| e.gsub(/\.(rb|json|js)/, '') }
         end
